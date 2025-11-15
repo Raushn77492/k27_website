@@ -1,4 +1,4 @@
-name: Deploy Node.js to Staging (EC2)
+name: Deploy Node.js to EC2 (No Docker, No Tests)
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Ensure backend folder permissions
+      - name: Ensure backend folder permissions on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -31,7 +31,7 @@ jobs:
             sudo chown -R $USER:$USER /home/${{ secrets.EC2_USER }}/backend
             sudo chmod -R u+rwX /home/${{ secrets.EC2_USER }}/backend
 
-      - name: Upload project to EC2 (SCP)
+      - name: Upload backend to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -41,7 +41,7 @@ jobs:
           target: /home/${{ secrets.EC2_USER }}/backend
           overwrite: true
 
-      - name: Deploy Node.js App on EC2
+      - name: Deploy Node.js app on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -52,43 +52,38 @@ jobs:
             cd /home/${{ secrets.EC2_USER }}/backend
 
             echo "Current directory: $(pwd)"
-            echo "Files in current directory:"
             ls -la
 
-            # Install Node.js 18 if not installed
+            # Install Node.js if missing
             if ! command -v node &> /dev/null; then
-              echo "Installing Node.js 18..."
+              echo "Installing Node.js..."
               curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
               sudo apt-get install -y nodejs
             fi
 
-            # Install PM2 if not installed
+            # Install PM2 if missing
             if ! command -v pm2 &> /dev/null; then
               echo "Installing PM2..."
               sudo npm install -g pm2
             fi
 
-            # Install dependencies
-            echo "Installing dependencies..."
+            echo "Installing production dependencies..."
             npm install --production
 
-            # Build the project if build script exists
-            if [ -f "package.json" ] && grep -q "\"build\"" package.json; then
+            # Run build if available
+            if grep -q "\"build\"" package.json; then
               echo "Running npm run build..."
               npm run build
             fi
 
-            # Stop running PM2 instance
-            echo "Stopping existing PM2 app..."
+            # Restart the Node.js backend
             pm2 stop backend-app || true
             pm2 delete backend-app || true
 
-            # Start new PM2 instance
-            echo "Starting Node.js backend with PM2..."
+            # IMPORTANT: update if your entry file is different
             pm2 start server.js --name backend-app
 
-            # Save PM2 startup so it restarts after reboot
             pm2 save
             pm2 startup systemd -u $USER --hp /home/$USER
 
-            echo "Deployment completed!"
+            echo "✔ Deployment done successfully!"
